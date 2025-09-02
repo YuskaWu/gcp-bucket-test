@@ -1,0 +1,9 @@
+services:
+  gcp-bucket-test:
+    platform: linux/arm64/v8
+    image: node:24-alpine
+    working_dir: /app
+    volumes:
+      - ./:/app
+    container_name: gcp-bucket-test
+    command: sh -c "npm ci && node index.mjs"
