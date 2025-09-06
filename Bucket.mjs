@@ -80,13 +80,14 @@ export default class BucketTest {
     }
   }
 
-  async showBucketAccessControlType() {
-    const [metadata] = await this.bucket.getMetadata()
-    console.log('[showBucketAccessControlType] metadata:', metadata)
-    // const uniformBucketLevelAccess = metadata.uniformBucketLevelAccess.enabled
+  async showBucketMetadata() {
+    try {
+      const [metadata] = await this.bucket.getMetadata()
+      console.log('[showBucketMetadata] metadata:', metadata)
+    } catch (e) {
+      console.error('[showBucketMetadata] Failed to show  metadata', e)
+    }
   }
-
-
 
   async showFiles() {
     // Lists files in the bucket
@@ -102,9 +103,14 @@ export default class BucketTest {
   }
 
   async createFolder(folderName) {
+
     const file = this.bucket.file(`${folderName}/`) // Note the trailing slash
-    await file.save('') // Save an empty string to create the placeholder
-    console.log(`[createFolder] Folder '${folderName}' created in bucket '${this.bucketName}'.`)
+    try {
+      await file.save('') // Save an empty string to create the placeholder
+      console.log(`[createFolder] Folder '${folderName}' created in bucket '${this.bucketName}'.`)
+    } catch (e) {
+      console.log(`[createFolder] Failed to create '${folderName}' folder`, e)
+    }
   }
 
 
@@ -117,80 +123,107 @@ export default class BucketTest {
 
     const path = prefixPath + file
 
-    await this.bucket.upload(file, {
-      destination: path,
-      preconditionOpts: { ifGenerationMatch: 0 }
-    })
-    console.log(`[uploadFile] ${file} uploaded to ${this.bucketName}/${path}`)
+    try {
+      await this.bucket.upload(file, {
+        destination: path,
+        preconditionOpts: { ifGenerationMatch: 0 }
+      })
+      console.log(`[uploadFile] ${file} uploaded to ${this.bucketName}/${path}`)
+    } catch (e) {
+      console.error(`[uploadFile] Failed to upload ${file}`, e)
+    }
   }
 
-  async showFilePublicUrl() {
-    const file = await this.bucket.file('test.txt')
+  async downloadFile(fileName, destinationPath) {
+    const options = {
+      destination: destinationPath,
+    }
+
+    try {
+      // Downloads the file from the specified bucket and file name
+      await this.bucket.file(fileName).download(options)
+      console.log(`[downloadFile] gs://${this.bucketName}/${fileName} downloaded to ${destinationPath}.`)
+    } catch (error) {
+      console.error('[downloadFile] Error downloading file:', error)
+    }
+  }
+
+  async deleteFile(fileName) {
+    try {
+      await this.bucket.file(fileName).delete()
+      console.log(`[deleteFile] File ${fileName} deleted from bucket ${this.bucketName}.`)
+    } catch (error) {
+      console.error(`[deleteFile] Error deleting file: ${error}`)
+    }
+  }
+
+  async showFilePublicUrl(fileName) {
+    const file = await this.bucket.file(fileName)
     console.log('[showFilePublicUrl] file public url:', file.publicUrl())
   }
 
-  async setFolderPublicWithIAM(folderName) {
-    console.log('Fetching current IAM policy...')
-    // 1. 取得儲存桶目前的 IAM 政策
-    const [policy] = await this.bucket.iam.getPolicy({ requestedPolicyVersion: 3 })
+  // async setFolderPublicWithIAM(folderName) {
+  //   console.log('[setFolderPublicWithIAM] Fetching current IAM policy...')
+  //   // 1. 取得儲存桶目前的 IAM 政策
+  //   const [policy] = await this.bucket.iam.getPolicy({ requestedPolicyVersion: 3 })
 
-    // IAM 政策版本必須是 3 或以上才支援 Conditions
-    if (policy.version < 3) {
-      policy.version = 3
-    }
+  //   // IAM 政策版本必須是 3 或以上才支援 Conditions
+  //   if (policy.version < 3) {
+  //     policy.version = 3
+  //   }
 
-    const roleToModify = 'roles/storage.objectViewer'
-    const memberToModify = 'allUsers'
+  //   const roleToModify = 'roles/storage.objectViewer'
+  //   const memberToModify = 'allUsers'
 
-    // 2.【關鍵步驟】過濾掉所有舊的、無條件的公開規則
-    // 我們只保留那些不是授予 allUsers 的規則，或者是有條件的規則
-    const originalBindingsCount = policy.bindings.length
-    policy.bindings = policy.bindings.filter(binding => {
-      const isPublicViewerRole =
-        binding.role === roleToModify && binding.members.includes(memberToModify)
+  //   // 2.【關鍵步驟】過濾掉所有舊的、無條件的公開規則
+  //   // 我們只保留那些不是授予 allUsers 的規則，或者是有條件的規則
+  //   const originalBindingsCount = policy.bindings.length
+  //   policy.bindings = policy.bindings.filter(binding => {
+  //     const isPublicViewerRole =
+  //       binding.role === roleToModify && binding.members.includes(memberToModify)
 
-      // 如果是授予 allUsers 的 viewer 角色，只有在它"已經有"條件時才保留，否則就過濾掉
-      if (isPublicViewerRole) {
-        return binding.condition != null
-      }
-      // 其他所有規則都保留
-      return true
-    })
+  //     // 如果是授予 allUsers 的 viewer 角色，只有在它"已經有"條件時才保留，否則就過濾掉
+  //     if (isPublicViewerRole) {
+  //       return binding.condition != null
+  //     }
+  //     // 其他所有規則都保留
+  //     return true
+  //   })
 
-    if (policy.bindings.length < originalBindingsCount) {
-      console.log('Found and removed one or more unconditional public access rules.')
-    } else {
-      console.log('No unconditional public access rules found to remove.')
-    }
+  //   if (policy.bindings.length < originalBindingsCount) {
+  //     console.log('Found and removed one or more unconditional public access rules.')
+  //   } else {
+  //     console.log('No unconditional public access rules found to remove.')
+  //   }
 
 
-    // 3. 定義並新增我們想要的、帶有條件的新規則
-    const newBinding = {
-      role: roleToModify,
-      members: [memberToModify],
-      condition: {
-        title: `Allow public access to folder ${folderName}`,
-        description: `Grants read access to all objects in the '${folderName}' directory.`,
-        expression: `resource.name.startsWith('projects/_/buckets/${this.bucketName}/objects/${folderName}/')`,
-      },
-    }
+  //   // 3. 定義並新增我們想要的、帶有條件的新規則
+  //   const newBinding = {
+  //     role: roleToModify,
+  //     members: [memberToModify],
+  //     condition: {
+  //       title: `Allow public access to folder ${folderName}`,
+  //       description: `Grants read access to all objects in the '${folderName}' directory.`,
+  //       expression: `resource.name.startsWith('projects/_/buckets/${this.bucketName}/objects/${folderName}/')`,
+  //     },
+  //   }
 
-    // 檢查是否已存在完全相同的綁定，避免重複新增
-    const bindingExists = policy.bindings.some(b => JSON.stringify(b) === JSON.stringify(newBinding))
+  //   // 檢查是否已存在完全相同的綁定，避免重複新增
+  //   const bindingExists = policy.bindings.some(b => JSON.stringify(b) === JSON.stringify(newBinding))
 
-    if (!bindingExists) {
-      policy.bindings.push(newBinding)
-      console.log(`[setFolderPublicWithIAM] Adding new conditional rule for folder "${folderName}"...`)
-    } else {
-      console.log(`[setFolderPublicWithIAM] The exact conditional rule for folder "${folderName}" already exists. No changes made.`)
-    }
+  //   if (!bindingExists) {
+  //     policy.bindings.push(newBinding)
+  //     console.log(`[setFolderPublicWithIAM] Adding new conditional rule for folder "${folderName}"...`)
+  //   } else {
+  //     console.log(`[setFolderPublicWithIAM] The exact conditional rule for folder "${folderName}" already exists. No changes made.`)
+  //   }
 
-    // 4. 設定更新後的 IAM 政策
-    console.log('[setFolderPublicWithIAM] Setting updated IAM policy...')
-    await this.bucket.iam.setPolicy(policy)
+  //   // 4. 設定更新後的 IAM 政策
+  //   console.log('[setFolderPublicWithIAM] Setting updated IAM policy...')
+  //   await this.bucket.iam.setPolicy(policy)
 
-    console.log(
-      `[setFolderPublicWithIAM] Successfully configured public access for folder "${folderName}" in bucket "${this.bucketName}".`
-    )
-  }
+  //   console.log(
+  //     `[setFolderPublicWithIAM] Successfully configured public access for folder "${folderName}" in bucket "${this.bucketName}".`
+  //   )
+  // }
 }
